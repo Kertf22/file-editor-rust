@@ -1,6 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyEvent};
 use crossterm::terminal::ClearType;
-use crossterm::{cursor, event, execute, queue,terminal};
+use crossterm::{cursor, event, execute, queue, terminal};
 use std::io::{self, stdout, Write};
 use std::time::Duration;
 
@@ -40,14 +40,19 @@ impl Editor {
         }
     }
 
-    fn process_keypress(&self) -> crossterm::Result<bool> {
+    fn process_keypress(&mut self) -> crossterm::Result<bool> {
         match self.reader.read_key()? {
             KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers: event::KeyModifiers::CONTROL,
             } => return Ok(false),
+            KeyEvent {
+                code: val @ (KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right| KeyCode::PageUp | KeyCode::PageDown| KeyCode::Home | KeyCode::End),
+                modifiers: event::KeyModifiers::NONE,
+            } => self.output.move_cursor(val),
             _ => {}
         }
+
         Ok(true)
     }
 
@@ -60,6 +65,7 @@ impl Editor {
 struct Output {
     win_size: (usize, usize),
     editor_contents: EditorContents,
+    cursor_controller: CursorController,
 }
 
 impl Output {
@@ -70,6 +76,7 @@ impl Output {
         Self {
             win_size,
             editor_contents: EditorContents::new(),
+            cursor_controller: CursorController::new(win_size),
         }
     }
 
@@ -82,14 +89,13 @@ impl Output {
         let screen_rows = self.win_size.1;
         let screen_columns = self.win_size.0;
         for i in 0..screen_rows {
-
             if i == screen_rows / 3 {
                 let mut welcome = format!("Ser Editor ---- version {}", VERSION);
                 if welcome.len() > screen_columns {
                     welcome.truncate(screen_columns)
                 }
-                let mut padding = (screen_columns - welcome.len()) /2;
-           
+                let mut padding = (screen_columns - welcome.len()) / 2;
+
                 if padding != 0 {
                     self.editor_contents.push('~');
                     padding -= 1
@@ -116,14 +122,19 @@ impl Output {
         }
     }
 
+    fn move_cursor(&mut self, direction: KeyCode) {
+        self.cursor_controller.move_cursor(direction);
+    }
+
     fn refresh_screen(&mut self) -> crossterm::Result<()> {
-        queue!(self.editor_contents, 
-            cursor::Hide,
-            cursor::MoveTo(0, 0))?;
+        queue!(self.editor_contents, cursor::Hide, cursor::MoveTo(0, 0))?;
         self.draw_rows();
+        /* modify */
+        let cursor_x = self.cursor_controller.cursor_x;
+        let cursor_y = self.cursor_controller.cursor_y;
         queue!(
-            self.editor_contents, 
-            cursor::MoveTo(0, 0),
+            self.editor_contents,
+            cursor::MoveTo(cursor_x as u16, cursor_y as u16),
             cursor::Show
         )?;
         self.editor_contents.flush()
@@ -165,6 +176,60 @@ impl Write for EditorContents {
         stdout().flush()?;
         self.content.clear();
         out
+    }
+}
+
+struct CursorController {
+    cursor_x: usize,
+    cursor_y: usize,
+    screen_columns: usize,
+    screen_rows: usize,
+}
+
+impl CursorController {
+    fn new(win_size: (usize, usize)) -> CursorController {
+        Self {
+            cursor_x: 0,
+            cursor_y: 0,
+            screen_columns: win_size.0,
+            screen_rows: win_size.1,
+        }
+    }
+
+    fn move_cursor(&mut self, direction: KeyCode) {
+        match direction {
+            KeyCode::Up => {
+                self.cursor_y = self.cursor_y.saturating_sub(1);
+            }
+            KeyCode::Left => {
+                if self.cursor_x > 0 {
+                    self.cursor_x -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.cursor_y < self.screen_rows - 1 {
+                    self.cursor_y += 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.cursor_x < self.screen_columns - 1 {
+                    self.cursor_x += 1;
+                }
+            }
+            KeyCode::PageUp => {
+                self.cursor_y = 0;
+            }
+            KeyCode::PageDown => {
+                self.cursor_y = self.screen_rows - 1;
+            }
+            KeyCode::Home => {
+                self.cursor_x = 0;
+            }
+            KeyCode::End => {
+                self.cursor_x = self.screen_columns - 1;
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 
